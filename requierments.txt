@@ -1,1 +1,7 @@
 numpy==1.26.3
+pandas==2.2.0
+scipy==1.11.4
+xxhash==3.4.1
+matplotlib==3.8.2
+Pyarrow==14.0.2
+openpyxl==3.1.2

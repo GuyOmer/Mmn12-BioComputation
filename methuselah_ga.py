@@ -1,77 +1,111 @@
 import logging
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 
+from constants import (
+    CROSSOVER_RATE,
+    MUTATION_RATE,
+    GENERATIONS,
+    MAX_POPULATION_CLUSTERS,
+)
 from game_of_life import GameOfLife
-
-GENERATIONS = 100
 
 logger = logging.getLogger(__name__)
 
 
 class MethuselahGA:
-    def __init__(self, population_size: int, board_size: int):
-        self.population_size = population_size
+    def __init__(self, starting_population_size: int, board_size: int):
+        self.starting_population_size = starting_population_size
         self.grid_size = board_size
         self.population = self.initialize_population()
 
-        self._crossover_rate = 0.1
-        self._mutation_rate = 0.06
+        self._crossover_rate = CROSSOVER_RATE
+        self._mutation_rate = MUTATION_RATE
+
+        self._avg_fitnesses = []
 
     def get_best_configuration(self):
         self.start()
 
-        best_configuration = max(
-            self.calculate_fitness(individual) for individual in self.population
-        )
+        final_configurations_fitnesses = {
+            self.evaluate(individual): individual for individual in self.population
+        }
+        best_fitness = max(final_configurations_fitnesses.keys())
+        best_configuration = final_configurations_fitnesses[best_fitness]
 
         return best_configuration
 
     def start(self):
         for i in range(GENERATIONS):
             logger.info(f"Running generation {i+1}")
-            self.evolve(self.population)
+            self.population = self.evolve(self.population)
 
-    def selection(self, parents: list):
-        fitnesses = [self.calculate_fitness(p) for p in parents]
+    def selection(
+        self, parents: list, avg_evaluation: float, parents_evaluations: Iterable[float]
+    ):
+        if avg_evaluation:
+            unnormalized_fitnesses = [pa / avg_evaluation for pa in parents_evaluations]
+            sum_unnormalized_fitnesses = sum(unnormalized_fitnesses)
+
+            fitnesses = [
+                unnormalized_fitness / sum_unnormalized_fitnesses
+                for unnormalized_fitness in unnormalized_fitnesses
+            ]
+        else:
+            # If both parents are "unfit" return both
+            fitnesses = [1 / len(parents)] * len(parents)
+
         return np.random.default_rng().choice(
             parents,
-            p=[fitness / sum(fitnesses) for fitness in fitnesses],
+            p=fitnesses,
             size=2,
         )
 
-    def calculate_fitness(self, configuration) -> float:
+    def evaluate(self, configuration) -> float:
         game = GameOfLife(configuration, self.grid_size)
 
         game.run()
-        max_population = game.max_population
+        population_growth = game.max_population - game.starting_population
 
-        return max_population / (self.grid_size**2)
+        if population_growth <= 0:
+            return 0
+
+        return population_growth / (self.grid_size**2)
 
     def initialize_population(self) -> Any:
         logger.info("Initializing population")
-        return np.random.default_rng().integers(
-            2,  # Yields 0 or 1
-            size=(
-                self.population_size,
-                self.grid_size,
-                self.grid_size,
-            ),
+        population = []
+
+        for _ in range(self.starting_population_size):
+            population.append(self._initialize_individual())
+        return population
+
+    def _initialize_individual(self):
+        grid = np.random.choice(
+            2, size=(MAX_POPULATION_CLUSTERS, MAX_POPULATION_CLUSTERS)
         )
+
+        return grid
 
     def evolve(self, population):
         new_population = []
+
+        parents_evaluations = [self.evaluate(p) for p in population]
+        avg_evaluation = np.average(parents_evaluations)
+
+        self._avg_fitnesses.append(avg_evaluation)
+
         for _ in range(len(population) // 2):
-            parent_1, parent_2 = self.selection(population)
+            parent_1, parent_2 = self.selection(
+                population, avg_evaluation, parents_evaluations
+            )
 
             # Crossover
-            logger.debug("Crossover")
             child1 = self.crossover(parent_1, parent_2)
             child2 = self.crossover(parent_2, parent_1)
 
             # Mutation
-            logger.debug("Mutation")
             child1 = self.mutation(child1)
             child2 = self.mutation(child2)
 
@@ -84,11 +118,10 @@ class MethuselahGA:
         """
         Performs mutation on an individual with a certain mutation rate.
         """
-        for i in range(self.grid_size):
-            for j in range(self.grid_size):
+        for i in range(MAX_POPULATION_CLUSTERS):
+            for j in range(MAX_POPULATION_CLUSTERS):
                 if np.random.rand() < self._mutation_rate:
                     individual[i, j] = 1 - individual[i, j]
-                    logger.debug("Mutation operation performed.")
 
         return individual
 
@@ -96,8 +129,11 @@ class MethuselahGA:
         if np.random.rand() > self._crossover_rate:
             return parent1
 
-        point = np.random.randint(1, self.grid_size - 1)
+        point = MAX_POPULATION_CLUSTERS // 2
         child = np.concatenate((parent1[:point], parent2[point:]))
-        logger.debug("Crossover operation performed.")
 
         return child
+
+    @property
+    def avg_fitnesses(self):
+        return self._avg_fitnesses

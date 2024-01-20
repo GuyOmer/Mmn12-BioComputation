@@ -21,8 +21,8 @@ class GameOfLifeGUI:
     def draw_grid(self):
         self.canvas.delete("all")
 
-        for row in range(self.game._grid_size):
-            for col in range(self.game._grid_size):
+        for row in range(self.game.grid_size):
+            for col in range(self.game.grid_size):
                 if self.game._grid[row, col] == 1:
                     x1, y1 = col * self.cell_size, row * self.cell_size
                     x2, y2 = x1 + self.cell_size, y1 + self.cell_size
@@ -32,8 +32,9 @@ class GameOfLifeGUI:
     def update(self):
         self.game.update_grid()
         self.draw_grid()
-        self.window.after(100, self.update)
+        self.window.after(1000, self.update)
 
     def run(self):
         self.update()
+        self.window.focus()
         self.window.mainloop()

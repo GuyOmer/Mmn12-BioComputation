@@ -2,16 +2,41 @@ import collections
 import logging
 
 import numpy as np
+import xxhash
+from scipy.signal import convolve2d
 
 logger = logging.getLogger(__name__)
 
 MAX_ROUNDS = 1000
 
+NEIGHBORS_KERNEL = np.array(
+    [
+        [1, 1, 1],
+        [1, 0, 1],
+        [1, 1, 1],
+    ]
+)
+
 
 class GameOfLife:
-    def __init__(self, starting_configuration, grid_size: int):
+    def __init__(self, starting_configuration: np.array, grid_size: int):
         self._grid_size = grid_size
-        self._grid = starting_configuration
+
+        grid = np.zeros((self.grid_size, self.grid_size))
+
+        # Calculate the start and end indices to place the population cluster in the center of the grid
+        start_index_x = (grid.shape[1] - starting_configuration.shape[1]) // 2
+        start_index_y = (grid.shape[0] - starting_configuration.shape[0]) // 2
+        end_index_x = start_index_x + starting_configuration.shape[1]
+        end_index_y = start_index_y + starting_configuration.shape[0]
+
+        # Place the small array in the center of the large array
+        grid[
+            start_index_y:end_index_y, start_index_x:end_index_x
+        ] = starting_configuration
+        self._grid = grid
+
+        self._starting_population = self._count_living_cells()
 
         self._max_population = 0
 
@@ -19,53 +44,47 @@ class GameOfLife:
 
     def run(self):
         for i in range(MAX_ROUNDS):
-            # logger.debug(f'Round {i+1}')
             self.update_grid()
 
             current_hash = self.hash_grid()
             if current_hash in self._history:
+                logger.debug(f"Stopping at round {i+1}")
                 break
 
             self._history.append(self.hash_grid())
-
-            self._max_population = max(
-                self._max_population,
-                self._count_living_cells(),
-            )
+        logger.debug(f"Stopping at round {MAX_ROUNDS}")
 
     def update_grid(self):
-        new_grid = self._grid.copy()
+        # Get the count of live neighbors for each cell
+        neighbors = self.count_live_neighbors_convolution(self._grid)
 
-        for row in range(self._grid_size):
-            for col in range(self._grid_size):
-                live_neighbors = self._count_live_neighbors(row, col, self._grid)
+        # Cells that will die (live cell with fewer than 2 or more than 3 neighbors)
+        death_mask = (self._grid == 1) & ((neighbors < 2) | (neighbors > 3))
 
-                if self._grid[row, col] == 1:
-                    if live_neighbors < 2 or live_neighbors > 3:
-                        new_grid[row, col] = 0
-                elif live_neighbors == 3:
-                    new_grid[row, col] = 1
+        # Cells that will come to life (dead cell with exactly 3 neighbors)
+        birth_mask = (self._grid == 0) & (neighbors == 3)
 
-        self._grid = new_grid
+        self._grid[death_mask] = 0
+        self._grid[birth_mask] = 1
 
-    def hash_grid(self) -> int:
-        live_cells = set()
-        first_scanned_cell = None
+        self._max_population = max(
+            self._max_population,
+            self._count_living_cells(),
+        )
 
-        for row in range(self._grid_size):
-            for col in range(self._grid_size):
-                if self._grid[row, col]:
-                    if first_scanned_cell is None:
-                        first_scanned_cell = (row, col)
+    def count_live_neighbors_convolution(self, grid):
+        grid_size = grid.shape[0]
+        # Apply convolution and use 'same' mode to keep the output size equal to the input size
+        neighbor_count = convolve2d(
+            grid, NEIGHBORS_KERNEL, mode="same", boundary="fill", fillvalue=0
+        )
+        return neighbor_count  # This will be a 2D array with the count of live neighbors for each cell
 
-                    live_cells.add(
-                        (
-                            row - first_scanned_cell[0],
-                            col - first_scanned_cell[1],
-                        )
-                    )
+    def hash_grid(self) -> str:
+        array_bytes = self._grid.ravel().view(np.uint8).tobytes()
 
-        return hash(frozenset(live_cells))
+        # Create a hash object and return the hash
+        return xxhash.xxh64(array_bytes).hexdigest()
 
     def _count_living_cells(self) -> int:
         count = np.sum(self._grid)
@@ -92,3 +111,7 @@ class GameOfLife:
     @property
     def max_population(self) -> int:
         return self._max_population
+
+    @property
+    def starting_population(self):
+        return self._starting_population
